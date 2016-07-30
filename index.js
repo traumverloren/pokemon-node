@@ -6,12 +6,16 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const Pokespotter = require('pokespotter');
 const moment = require('moment');
+const twilio = require('twilio');
+const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const app = express();
 
 app.use(bodyParser.json({}))
 app.use(bodyParser.urlencoded({
   extended: true
 }));
+
+const PokeWatchers = new Map();
 
 const PORT = process.env.PORT || 3000;
 
@@ -53,16 +57,52 @@ app.get('/:address', (req, res) => {
 
 app.post('/incoming', (req, res) => {
   let message = req.body.Body;
-  getPokemonByAddress(message).then(pokemon => {
-    console.log(formatPokeList(pokemon, message));
-    let response = formatPokeList(pokemon, message);
-    res.send(`<Response><Message>${response}</Message></Response>`);
-  }).catch(err => {
-    res.type('text/plain').status(500).send('An error occurred. Check your console.');
-    console.error(err);
-  });
+  if (message.toLowerCase().trim().indexOf('subscribe:') === 0 && message.indexOf(';') !== -1) {
+    message = message.substr('subscribe:'.length);
+    let [pokemonName, location] = message.split(';').map(m => m.trim());
+
+    if (POKEDEX.indexOf(pokemonName) !== -1) {
+      PokeWatchers.set(`${req.body.From},${pokemonName}`, location);
+      console.log(pokemonName, location);
+      res.type('text/plain').send(`We will be on the watch for ${pokemonName} around ${location}`);
+    } else {
+      res.type('text/plain').send(`The Pokemon with the name ${pokemonName} doesn't exist.`);
+    }
+  } else {
+    getPokemonByAddress(message).then(pokemon => {
+      console.log(formatPokeList(pokemon, message));
+      let response = formatPokeList(pokemon, message);
+      res.send(`<Response><Message>${response}</Message></Response>`);
+    }).catch(err => {
+      res.type('text/plain').status(500).send('An error occurred. Check your console.');
+      console.error(err);
+    });
+  }
 });
+
+function watchForPokemon() {
+  console.log('Looking for Pokemon...');
+  for(let [keyInfo, address] of PokeWatchers) {
+    let [number, wantedPokemon] = keyInfo.split(',');
+    getPokemonByAddress(address).then(pokemon => {
+      let availablePokemon = pokemon.filter(poke => poke.name.toLowerCase() === wantedPokemon.toLowerCase());
+      if (availablePokemon.length !== 0) {
+        let body = formatPokeList(availablePokemon, address);
+        let from = process.env.TWILIO_NUMBER;
+        let to = number;
+        PokeWatchers.delete(keyInfo);
+        return client.sendMessage({body, from, to});
+      }
+      return Promise.resolve(true);
+    }).catch(err => {
+      console.error('An error occurred. Check your console.');
+      console.error(err);
+    });
+  }
+}
 
 app.listen(PORT, () => {
   console.log(`Listening on port ${PORT}`);
+  watchForPokemon();
+  setInterval(watchForPokemon, 60 * 1000);
 });
