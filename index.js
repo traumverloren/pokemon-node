@@ -33,13 +33,34 @@ function getPokemonByAddress(address) {
   });
 }
 
+function formatPokeList(pokeList, address) {
+  let formattedPokemon = pokeList.map(pokemon => {
+    return `${pokemon.name}, ${pokemon.distance}m, ${pokemon.duration}`;
+  }).join('\n')
+  return `There are the following Pokemon around ${address}:
+${formattedPokemon}`;
+}
+
 app.get('/:address', (req, res) => {
-  getPokemonByAddress(req.params.address).then(pokemon => {
-    res.type('text/plain').send(pokemon.map(function (p) { return JSON.stringify(p); }).toString());
+  let address = req.params.address;
+  getPokemonByAddress(address).then(pokemon => {
+    res.type('text/plain').send(formatPokeList(pokemon, address));
   }).catch(err => {
     res.type('text/plain').status(500).send('An error occurred. Check your console.');
     console.error(err);
   });
+});
+
+app.post('/incoming', (req, res) => {
+  let message = req.body.Body;
+  getPokemonByAddress(message).then(pokemon => {
+    console.log(formatPokeList(pokemon, message));
+    let response = formatPokeList(pokemon, message);
+    res.send(`<Response><Message>${response}</Message></Response>`);
+  }).catch(err => {
+    res.type('text/plain').status(500).send('An error occurred. Check your console.');
+    console.error(err);
+  });
 });
 
 app.listen(PORT, () => {
